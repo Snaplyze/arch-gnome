@@ -63,7 +63,7 @@ main() {
     trap 'trap_error ${FUNCNAME} ${LINENO}' ERR
 
     # Print version to logfile
-    log_info "ARCH LINUX ${VERSION}"
+    log_info "Arch Linux ${VERSION}"
 
     # Start recovery
     [[ "$1" = "--recovery"* ]] && {
@@ -76,7 +76,7 @@ main() {
     # Loop properties step to update screen if user edit properties
     while (true); do
 
-        print_header "ARCH LINUX Installer" # Show landig page
+        print_header "Arch Linux Installer" # Show landig page
         gum_white 'Please make sure you have:' && echo
         gum_white '• Backed up your important data'
         gum_white '• A stable internet connection'
@@ -88,7 +88,7 @@ main() {
             gum_confirm "Remove existing installer.conf?" || trap_gum_exit # If not want remove config > exit script
             echo && gum_title "Properties File"
             mv -f "$SCRIPT_CONFIG" "${SCRIPT_CONFIG}.old" && gum_info "installer.conf was moved to installer.conf.old"
-            gum_warn "Please restart ARCH LINUX Installer..."
+            gum_warn "Please restart Arch Linux Installer..."
             echo && exit 0
         fi
 
@@ -148,11 +148,11 @@ main() {
 
     # Start installation in 5 seconds?
     if [ "$FORCE" = "false" ]; then
-        gum_confirm "Start ARCH LINUX Installation?" || trap_gum_exit
+        gum_confirm "Start Arch Linux Installation?" || trap_gum_exit
     fi
-    local spin_title="ARCH LINUX Installation starts in 5 seconds. Press CTRL + C to cancel..."
+    local spin_title="Arch Linux Installation starts in 5 seconds. Press CTRL + C to cancel..."
     echo && ! gum_spin --title="$spin_title" -- sleep 5 && trap_gum_exit # CTRL + C pressed
-    gum_title "ARCH LINUX Installation"
+    gum_title "Arch Linux Installation"
 
     SECONDS=0 # Messure execution time of installation
 
@@ -183,7 +183,7 @@ main() {
     # Copy installer files to users home
     if [ "$DEBUG" = "false" ]; then
         cp -f "$SCRIPT_CONFIG" "/mnt/home/${ARCH_LINUX_USERNAME}/installer.conf"
-        sed -i "1i\# ARCH LINUX Version: ${VERSION}" "/mnt/home/${ARCH_LINUX_USERNAME}/installer.conf"
+        sed -i "1i\# Arch Linux Version: ${VERSION}" "/mnt/home/${ARCH_LINUX_USERNAME}/installer.conf"
         cp -f "$SCRIPT_LOG" "/mnt/home/${ARCH_LINUX_USERNAME}/installer.log"
         arch-chroot /mnt chown -R "$ARCH_LINUX_USERNAME":"$ARCH_LINUX_USERNAME" "/home/${ARCH_LINUX_USERNAME}/installer.conf"
         arch-chroot /mnt chown -R "$ARCH_LINUX_USERNAME":"$ARCH_LINUX_USERNAME" "/home/${ARCH_LINUX_USERNAME}/installer.log"
@@ -209,11 +209,11 @@ main() {
     fi
 
     # Reboot promt
-    [ "$FORCE" = "false" ] && gum_confirm "Reboot to ARCH LINUX now?" && do_reboot="true" && do_unmount="true"
+    [ "$FORCE" = "false" ] && gum_confirm "Reboot to Arch Linux now?" && do_reboot="true" && do_unmount="true"
 
     # Unmount
-    [ "$FORCE" = "false" ] && [ "$do_reboot" = "false" ] && gum_confirm "Unmount ARCH LINUX from /mnt?" && do_unmount="true"
-    [ "$do_unmount" = "true" ] && echo && gum_warn "Unmounting ARCH LINUX from /mnt..."
+    [ "$FORCE" = "false" ] && [ "$do_reboot" = "false" ] && gum_confirm "Unmount Arch Linux from /mnt?" && do_unmount="true"
+    [ "$do_unmount" = "true" ] && echo && gum_warn "Unmounting Arch Linux from /mnt..."
     if [ "$DEBUG" = "false" ] && [ "$do_unmount" = "true" ]; then
         swapoff -a
         umount -A -R /mnt
@@ -221,12 +221,12 @@ main() {
     fi
 
     # Do reboot
-    [ "$FORCE" = "false" ] && [ "$do_reboot" = "true" ] && gum_warn "Rebooting to ARCH LINUX..." && [ "$DEBUG" = "false" ] && reboot
+    [ "$FORCE" = "false" ] && [ "$do_reboot" = "true" ] && gum_warn "Rebooting to Arch Linux..." && [ "$DEBUG" = "false" ] && reboot
 
     # Chroot
-    [ "$FORCE" = "false" ] && [ "$do_unmount" = "false" ] && gum_confirm "Chroot to new ARCH LINUX?" && do_chroot="true"
-    if [ "$do_chroot" = "true" ] && echo && gum_warn "Chrooting ARCH LINUX at /mnt..."; then
-        gum_warn "!! YOUR ARE NOW ON YOUR NEW ARCH LINUX SYSTEM !!"
+    [ "$FORCE" = "false" ] && [ "$do_unmount" = "false" ] && gum_confirm "Chroot to new Arch Linux?" && do_chroot="true"
+    if [ "$do_chroot" = "true" ] && echo && gum_warn "Chrooting Arch Linux at /mnt..."; then
+        gum_warn "!! YOUR ARE NOW ON YOUR NEW Arch Linux SYSTEM !!"
         gum_warn ">> Leave with command 'exit'"
         if [ "$DEBUG" = "false" ]; then
             arch-chroot /mnt </dev/tty || true
@@ -236,7 +236,7 @@ main() {
     fi
 
     # Print warning
-    [ "$do_unmount" = "false" ] && [ "$do_chroot" = "false" ] && echo && gum_warn "ARCH LINUX is still mounted at /mnt"
+    [ "$do_unmount" = "false" ] && [ "$do_chroot" = "false" ] && echo && gum_warn "Arch Linux is still mounted at /mnt"
 
     gum_info "Exit" && exit 0
 }
@@ -246,7 +246,7 @@ main() {
 # ////////////////////////////////////////////////////////////////////////////////////////////////////
 
 start_recovery() {
-    print_header "ARCH LINUX Recovery"
+    print_header "Arch Linux Recovery"
     local recovery_boot_partition recovery_root_partition user_input items options
     local recovery_mount_dir="/mnt/recovery"
     local recovery_crypt_label="cryptrecovery"
@@ -263,7 +263,7 @@ start_recovery() {
     mapfile -t items < <(lsblk -I 8,259,254 -d -o KNAME,SIZE -n)
     # size: $(lsblk -d -n -o SIZE "/dev/${item}")
     options=() && for item in "${items[@]}"; do options+=("/dev/${item}"); done
-    user_input=$(gum_choose --header "+ Select ARCH LINUX Disk" "${options[@]}") || exit 130
+    user_input=$(gum_choose --header "+ Select Arch Linux Disk" "${options[@]}") || exit 130
     gum_title "Recovery"
     [ -z "$user_input" ] && log_fail "Disk is empty" && exit 1 # Check if new value is null
     user_input=$(echo "$user_input" | awk -F' ' '{print $1}')  # Remove size from input
@@ -368,7 +368,7 @@ properties_generate() {
 properties_preset_source() {
 
     # Default presets
-    [ -z "$ARCH_LINUX_HOSTNAME" ] && ARCH_LINUX_HOSTNAME="arch-linux"
+    [ -z "$ARCH_LINUX_HOSTNAME" ] && ARCH_LINUX_HOSTNAME="archlyze"
     [ -z "$ARCH_LINUX_KERNEL" ] && ARCH_LINUX_KERNEL="linux-zen"
     [ -z "$ARCH_LINUX_DESKTOP_EXTRAS_ENABLED" ] && ARCH_LINUX_DESKTOP_EXTRAS_ENABLED='true'
     [ -z "$ARCH_LINUX_VM_SUPPORT_ENABLED" ] && ARCH_LINUX_VM_SUPPORT_ENABLED="true"
@@ -808,7 +808,7 @@ exec_prepare_disk() {
 # ---------------------------------------------------------------------------------------------------
 
 exec_pacstrap_core() {
-    local process_name="Pacstrap ARCH LINUX Core"
+    local process_name="Pacstrap Arch Linux Core"
     process_init "$process_name"
     (
         [ "$DEBUG" = "true" ] && sleep 1 && process_return 0 # If debug mode then return
@@ -888,14 +888,14 @@ exec_pacstrap_core() {
         } >/mnt/boot/loader/loader.conf
 
         { # Create default boot entry
-            echo 'title   ARCH LINUX'
+            echo 'title   Arch Linux'
             echo "linux   /vmlinuz-${ARCH_LINUX_KERNEL}"
             echo "initrd  /initramfs-${ARCH_LINUX_KERNEL}.img"
             echo "options ${kernel_args[*]}"
         } >/mnt/boot/loader/entries/arch.conf
 
         { # Create fallback boot entry
-            echo 'title   ARCH LINUX (Fallback)'
+            echo 'title   Arch Linux (Fallback)'
             echo "linux   /vmlinuz-${ARCH_LINUX_KERNEL}"
             echo "initrd  /initramfs-${ARCH_LINUX_KERNEL}-fallback.img"
             echo "options ${kernel_args[*]}"
@@ -924,7 +924,7 @@ exec_pacstrap_core() {
         arch-chroot /mnt systemctl enable systemd-boot-update.service      # Auto bootloader update
         arch-chroot /mnt systemctl enable systemd-timesyncd.service        # Sync time from internet after boot
 
-        # Make some ARCH LINUX tweaks
+        # Make some Arch Linux tweaks
         if [ "$ARCH_LINUX_CORE_TWEAKS_ENABLED" = "true" ]; then
 
             # Add password feedback
@@ -1104,7 +1104,7 @@ exec_install_desktop() {
                 echo 'EndSection'
             } >/mnt/etc/X11/xorg.conf.d/00-keyboard.conf
 
-            # Enable ARCH LINUX Desktop services
+            # Enable Arch Linux Desktop services
             arch-chroot /mnt systemctl enable gdm.service       # GNOME
             arch-chroot /mnt systemctl enable bluetooth.service # Bluetooth
             arch-chroot /mnt systemctl enable avahi-daemon      # Network browsing service
@@ -1403,35 +1403,35 @@ exec_install_vm_support() {
 
 # shellcheck disable=SC2016
 exec_finalize_arch_linux() {
-    local process_name="Finalize ARCH LINUX"
+    local process_name="Finalize Arch Linux"
     if [ -s "/mnt/home/${ARCH_LINUX_USERNAME}/${INIT_FILENAME}.sh" ]; then
         process_init "$process_name"
         (
             [ "$DEBUG" = "true" ] && sleep 1 && process_return 0 # If debug mode then return
-            mkdir -p "/mnt/home/${ARCH_LINUX_USERNAME}/.arch-linux/system"
+            mkdir -p "/mnt/home/${ARCH_LINUX_USERNAME}/.archlyze/system"
             mkdir -p "/mnt/home/${ARCH_LINUX_USERNAME}/.config/autostart"
-            mv "/mnt/home/${ARCH_LINUX_USERNAME}/${INIT_FILENAME}.sh" "/mnt/home/${ARCH_LINUX_USERNAME}/.arch-linux/system/${INIT_FILENAME}.sh"
+            mv "/mnt/home/${ARCH_LINUX_USERNAME}/${INIT_FILENAME}.sh" "/mnt/home/${ARCH_LINUX_USERNAME}/.archlyze/system/${INIT_FILENAME}.sh"
             # Add version env
-            sed -i "1i\ARCH_LINUX_VERSION=${VERSION}" "/mnt/home/${ARCH_LINUX_USERNAME}/.arch-linux/system/${INIT_FILENAME}.sh"
+            sed -i "1i\ARCH_LINUX_VERSION=${VERSION}" "/mnt/home/${ARCH_LINUX_USERNAME}/.archlyze/system/${INIT_FILENAME}.sh"
             # Add shebang
-            sed -i '1i\#!/usr/bin/env bash' "/mnt/home/${ARCH_LINUX_USERNAME}/.arch-linux/system/${INIT_FILENAME}.sh"
+            sed -i '1i\#!/usr/bin/env bash' "/mnt/home/${ARCH_LINUX_USERNAME}/.archlyze/system/${INIT_FILENAME}.sh"
             # Add autostart-remove
             {
                 echo "# exec_finalize_arch_linux | Remove autostart init files"
                 echo "rm -f /home/${ARCH_LINUX_USERNAME}/.config/autostart/${INIT_FILENAME}.desktop"
-            } >>"/mnt/home/${ARCH_LINUX_USERNAME}/.arch-linux/system/${INIT_FILENAME}.sh"
+            } >>"/mnt/home/${ARCH_LINUX_USERNAME}/.archlyze/system/${INIT_FILENAME}.sh"
             # Print initialized info
             {
                 echo "# exec_finalize_arch_linux | Print initialized info"
-                echo "echo \"\$(date '+%Y-%m-%d %H:%M:%S') | ARCH LINUX \${ARCH_LINUX_VERSION} | Initialized\""
-            } >>"/mnt/home/${ARCH_LINUX_USERNAME}/.arch-linux/system/${INIT_FILENAME}.sh"
-            arch-chroot /mnt chmod +x "/home/${ARCH_LINUX_USERNAME}/.arch-linux/system/${INIT_FILENAME}.sh"
+                echo "echo \"\$(date '+%Y-%m-%d %H:%M:%S') | Arch Linux \${ARCH_LINUX_VERSION} | Initialized\""
+            } >>"/mnt/home/${ARCH_LINUX_USERNAME}/.archlyze/system/${INIT_FILENAME}.sh"
+            arch-chroot /mnt chmod +x "/home/${ARCH_LINUX_USERNAME}/.archlyze/system/${INIT_FILENAME}.sh"
             {
                 echo "[Desktop Entry]"
                 echo "Type=Application"
-                echo "Name=ARCH LINUX Initialize"
+                echo "Name=Arch Linux Initialize"
                 echo "Icon=preferences-system"
-                echo "Exec=bash -c '/home/${ARCH_LINUX_USERNAME}/.arch-linux/system/${INIT_FILENAME}.sh > /home/${ARCH_LINUX_USERNAME}/.arch-linux/system/${INIT_FILENAME}.log'"
+                echo "Exec=bash -c '/home/${ARCH_LINUX_USERNAME}/.archlyze/system/${INIT_FILENAME}.sh > /home/${ARCH_LINUX_USERNAME}/.archlyze/system/${INIT_FILENAME}.log'"
             } >"/mnt/home/${ARCH_LINUX_USERNAME}/.config/autostart/${INIT_FILENAME}.desktop"
             arch-chroot /mnt chown -R "$ARCH_LINUX_USERNAME":"$ARCH_LINUX_USERNAME" "/home/${ARCH_LINUX_USERNAME}"
             process_return 0 # Return
@@ -1630,7 +1630,7 @@ print_filled_space() {
 
 gum_init() {
     if [ ! -x ./gum ]; then
-        clear && echo "Loading ARCH LINUX Installer..." # Loading
+        clear && echo "Loading Arch Linux Installer..." # Loading
         local gum_url gum_path                       # Prepare URL with version os and arch
         # https://github.com/charmbracelet/gum/releases
         gum_url="https://github.com/charmbracelet/gum/releases/download/v${GUM_VERSION}/gum_${GUM_VERSION}_$(uname -s)_$(uname -m).tar.gz"
@@ -1689,7 +1689,7 @@ gum_property() { log_prop "$*" && gum join "$(gum_green --bold "• ")" "$(gum_w
 # LOGGING WRAPPER
 # ////////////////////////////////////////////////////////////////////////////////////////////////////
 
-write_log() { echo -e "$(date '+%Y-%m-%d %H:%M:%S') | arch-linux | ${*}" >>"$SCRIPT_LOG"; }
+write_log() { echo -e "$(date '+%Y-%m-%d %H:%M:%S') | archlyze | ${*}" >>"$SCRIPT_LOG"; }
 log_info() { write_log "INFO | ${*}"; }
 log_warn() { write_log "WARN | ${*}"; }
 log_fail() { write_log "FAIL | ${*}"; }
