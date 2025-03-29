@@ -1300,7 +1300,7 @@ exec_install_bootsplash() {
             [ "$DEBUG" = "true" ] && sleep 1 && process_return 0                                       # If debug mode then return
             chroot_pacman_install plymouth git base-devel                                              # Install packages
             sed -i "s/base systemd keyboard/base systemd plymouth keyboard/g" /mnt/etc/mkinitcpio.conf # Configure mkinitcpio
-            arch-chroot /mnt plymouth-set-default-theme -R spinner                                     # Set Theme & rebuild initram disk
+            arch-chroot /mnt plymouth-set-default-theme -R bgrt                                     # Set Theme & rebuild initram disk
             process_return 0                                                                           # Return
         ) &>"$PROCESS_LOG" &
         process_capture $! "$process_name"
