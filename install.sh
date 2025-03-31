@@ -377,8 +377,8 @@ properties_preset_source() {
     [ -z "$ARCH_LINUX_VM_SUPPORT_ENABLED" ] && ARCH_LINUX_VM_SUPPORT_ENABLED="true"
     [ -z "$ARCH_LINUX_ECN_ENABLED" ] && ARCH_LINUX_ECN_ENABLED="true"
     [ -z "$ARCH_LINUX_DESKTOP_KEYBOARD_MODEL" ] && ARCH_LINUX_DESKTOP_KEYBOARD_MODEL="pc105"
-    # Default filesystem if not set
-    [ -z "$ARCH_LINUX_FILESYSTEM" ] && ARCH_LINUX_FILESYSTEM="ext4"
+    # !!! УБРАНА СТРОКА УСТАНОВКИ ФС ПО УМОЛЧАНИЮ !!!
+    # [ -z "$ARCH_LINUX_FILESYSTEM" ] && ARCH_LINUX_FILESYSTEM="ext4"
 
     # Set microcode
     [ -z "$ARCH_LINUX_MICROCODE" ] && grep -E "GenuineIntel" &>/dev/null <<<"$(lscpu)" && ARCH_LINUX_MICROCODE="intel-ucode"
@@ -422,6 +422,11 @@ properties_preset_source() {
         properties_source   # Source the newly generated file
         gum join "$(gum_green --bold "• ")" "$(gum_white "Setup preset loaded for: ")" "$(gum_white --bold "$preset")"
     fi
+    # Устанавливаем ФС по умолчанию ТОЛЬКО если она все еще не задана ПОСЛЕ загрузки/генерации конфига
+    # Это позволит загрузить значение из файла, если оно там есть.
+    # А если нет - то select_filesystem все равно предложит выбор, т.к. переменная будет пуста.
+    # На самом деле, этот блок уже не нужен, т.к. select_filesystem сам предложит выбор.
+    # [ -z "$ARCH_LINUX_FILESYSTEM" ] && ARCH_LINUX_FILESYSTEM="ext4"
     return 0
 }
 
@@ -598,21 +603,25 @@ select_reflector_countries() {
         "Norway"
         "Poland"
         "Germany"
-        "Czechia" # или "Czech Republic", уточните по выводу reflector --list-countries
+        "Czechia" # Уточните название!
         "Latvia"
         "Lithuania"
         "Estonia"
     )
+    # Сортируем список для удобства пользователя
     mapfile -t sorted_countries_list < <(printf "%s\n" "${countries_list[@]}" | sort)
     # --- КОНЕЦ СТАТИЧЕСКОГО СПИСКА ---
 
     log_info "Using predefined country list for reflector selection."
 
-    # Используем gum filter для выбора одной или нескольких стран
+    # --- ИСПОЛЬЗУЕМ gum choose --no-limit ---
     local selected_countries_array=()
-    # --- ИЗМЕНЕНА ПОДСКАЗКА ---
-    local header_txt="+ Choose Mirror Countries (TAB to select multiple, Enter to confirm)"
-    mapfile -t selected_countries_array < <(gum filter --no-limit --height 15 --header "$header_txt" "${sorted_countries_list[@]}") || trap_gum_exit_confirm
+    # Подсказка изменена для gum choose
+    local header_txt="+ Choose Mirror Countries (SPACE to select/deselect, Enter to confirm)"
+    # Используем gum choose с флагом --no-limit
+    # limit=1 убран, т.к. --no-limit позволяет выбрать несколько
+    # height установлен для ограничения высоты списка
+    mapfile -t selected_countries_array < <(gum choose --no-limit --height 15 --header "$header_txt" "${sorted_countries_list[@]}") || trap_gum_exit_confirm
 
     # Проверяем, выбрал ли пользователь что-то
     if [ ${#selected_countries_array[@]} -eq 0 ]; then
@@ -627,6 +636,7 @@ select_reflector_countries() {
 
     # Преобразуем массив выбранных стран в строку, разделенную запятыми
     local selected_countries_string
+    # Обработка случая, если выбрано "Worldwide" и что-то еще
     if [[ " ${selected_countries_array[*]} " == *" Worldwide "* ]] && [ ${#selected_countries_array[@]} -gt 1 ]; then
          if gum_confirm "You selected 'Worldwide' and other countries. Use ONLY 'Worldwide'?" --affirmative="Only Worldwide" --negative="Keep Selection"; then
              selected_countries_array=("Worldwide")
