@@ -588,11 +588,8 @@ select_reflector_countries() {
     fi
 
     # --- СТАТИЧЕСКИЙ СПИСОК СТРАН (без Ukraine) ---
-    # Вы можете легко добавить или убрать страны из этого списка
-    # Названия должны точно соответствовать тем, что понимает reflector
-    # (проверить можно, запустив reflector --list-countries один раз вручную в ISO)
     local countries_list=(
-        "Worldwide" # Важно для глобальных зеркал
+        "Worldwide"
         "Russia"
         "Belarus"
         "Kazakhstan"
@@ -605,9 +602,7 @@ select_reflector_countries() {
         "Latvia"
         "Lithuania"
         "Estonia"
-        # Добавьте другие релевантные страны при необходимости
     )
-    # Сортируем список для удобства пользователя
     mapfile -t sorted_countries_list < <(printf "%s\n" "${countries_list[@]}" | sort)
     # --- КОНЕЦ СТАТИЧЕСКОГО СПИСКА ---
 
@@ -615,38 +610,33 @@ select_reflector_countries() {
 
     # Используем gum filter для выбора одной или нескольких стран
     local selected_countries_array=()
-    local header_txt="+ Choose Mirror Countries (Space to select, Enter to confirm)"
+    # --- ИЗМЕНЕНА ПОДСКАЗКА ---
+    local header_txt="+ Choose Mirror Countries (TAB to select multiple, Enter to confirm)"
     mapfile -t selected_countries_array < <(gum filter --no-limit --height 15 --header "$header_txt" "${sorted_countries_list[@]}") || trap_gum_exit_confirm
 
     # Проверяем, выбрал ли пользователь что-то
     if [ ${#selected_countries_array[@]} -eq 0 ]; then
-         # Предлагаем использовать "Worldwide" или попробовать снова
         if gum_confirm "No countries selected. Use 'Worldwide' mirrors or try again?" --affirmative="Use Worldwide" --negative="Try Again"; then
-            ARCH_LINUX_REFLECTOR_COUNTRY="Worldwide" && properties_generate # Явно указываем Worldwide
+            ARCH_LINUX_REFLECTOR_COUNTRY="Worldwide" && properties_generate
             gum_property "Reflector Countries" "Worldwide"
-            return 0 # Выбор сделан (Worldwide)
+            return 0
         else
-            return 1 # Возвращаем ошибку, чтобы until в main сработал и выбор повторился
+            return 1
         fi
     fi
 
     # Преобразуем массив выбранных стран в строку, разделенную запятыми
     local selected_countries_string
-    # Обработка случая, если выбрано только "Worldwide" - не добавлять другие
     if [[ " ${selected_countries_array[*]} " == *" Worldwide "* ]] && [ ${#selected_countries_array[@]} -gt 1 ]; then
-         # Если выбрано "Worldwide" и что-то еще, спросим пользователя
          if gum_confirm "You selected 'Worldwide' and other countries. Use ONLY 'Worldwide'?" --affirmative="Only Worldwide" --negative="Keep Selection"; then
-             selected_countries_array=("Worldwide") # Оставляем только Worldwide
+             selected_countries_array=("Worldwide")
          fi
     fi
 
-    # Собираем строку
     selected_countries_string=$(printf "%s," "${selected_countries_array[@]}")
-    selected_countries_string=${selected_countries_string%,} # Убираем последнюю запятую
+    selected_countries_string=${selected_countries_string%,}
 
-    # Сохраняем результат
     ARCH_LINUX_REFLECTOR_COUNTRY="$selected_countries_string" && properties_generate
-
     gum_property "Reflector Countries" "$ARCH_LINUX_REFLECTOR_COUNTRY"
     return 0
 }
