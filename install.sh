@@ -587,18 +587,43 @@ select_reflector_countries() {
         return 0
     fi
 
+    # --- ДОБАВЛЕНО: Проверка и установка Reflector ---
+    if ! command -v reflector &> /dev/null; then
+        log_warn "Reflector command not found. Attempting to install..."
+        # Проверяем сеть перед попыткой установки
+        if ! ping -c 1 archlinux.org &>/dev/null; then
+             log_fail "Network connection unavailable. Cannot install reflector."
+             gum_warn "Network unavailable. Cannot fetch country list or install reflector. Using global mirrors."
+             ARCH_LINUX_REFLECTOR_COUNTRY="" && properties_generate
+             gum_property "Reflector Countries" "(Global - Network Error)"
+             return 0 # Выходим успешно, т.к. решение принято (глобальные)
+        fi
+        # Пытаемся установить reflector
+        if ! gum_spin --title "Installing reflector..." -- pacman -Sy --noconfirm reflector; then
+            log_fail "Failed to install reflector. Cannot fetch country list."
+            gum_warn "Failed to install reflector. Using global mirrors."
+            ARCH_LINUX_REFLECTOR_COUNTRY="" && properties_generate
+            gum_property "Reflector Countries" "(Global - Install Failed)"
+            return 0 # Выходим успешно, т.к. решение принято (глобальные)
+        fi
+        log_info "Reflector installed successfully."
+    fi
+    # --- КОНЕЦ ДОБАВЛЕННОГО БЛОКА ---
+
     # Получаем список стран от reflector
     local countries_list=()
     local country_item
+    # Используем gum spin для индикации во время запроса
     gum_spin --title "Fetching country list from reflector..." -- mapfile -t countries_list < <(reflector --list-countries 2>/dev/null)
 
+    # Проверяем, пуст ли массив стран (может быть пуст даже если reflector установлен, если API недоступен)
     if [ ${#countries_list[@]} -eq 0 ]; then
-        log_warn "Could not fetch country list from reflector. Skipping selection."
+        log_warn "Could not fetch country list from reflector (API issue or empty list?). Skipping selection."
         gum_warn "Could not fetch country list from reflector. Using global mirrors."
         ARCH_LINUX_REFLECTOR_COUNTRY="" # Оставляем пустым для глобального поиска
         properties_generate # Сохраняем пустую переменную
-        gum_property "Reflector Countries" "(Global)"
-        return 0
+        gum_property "Reflector Countries" "(Global - Fetch Failed)"
+        return 0 # Завершаем функцию успешно, используя глобальные зеркала
     fi
 
     # Используем gum filter для выбора одной или нескольких стран
