@@ -169,7 +169,6 @@ main() {
     exec_install_housekeeping
     exec_install_desktop
     exec_install_graphics_driver
-    exec_install_vm_support
     exec_finalize_arch_linux
     exec_cleanup_installation
 
@@ -364,7 +363,6 @@ properties_generate() {
         echo "ARCH_LINUX_DESKTOP_KEYBOARD_MODEL='${ARCH_LINUX_DESKTOP_KEYBOARD_MODEL}'"
         echo "ARCH_LINUX_DESKTOP_KEYBOARD_LAYOUT='${ARCH_LINUX_DESKTOP_KEYBOARD_LAYOUT}'"
         echo "ARCH_LINUX_DESKTOP_KEYBOARD_VARIANT='${ARCH_LINUX_DESKTOP_KEYBOARD_VARIANT}'"
-        echo "ARCH_LINUX_VM_SUPPORT_ENABLED='${ARCH_LINUX_VM_SUPPORT_ENABLED}'"
         echo "ARCH_LINUX_ECN_ENABLED='${ARCH_LINUX_ECN_ENABLED}'"
     } >"$SCRIPT_CONFIG" # Write properties to file
 }
@@ -374,7 +372,6 @@ properties_preset_source() {
     # Default presets that are not filesystem/hostname dependent
     [ -z "$ARCH_LINUX_KERNEL" ] && ARCH_LINUX_KERNEL="linux-zen"
     [ -z "$ARCH_LINUX_DESKTOP_EXTRAS_ENABLED" ] && ARCH_LINUX_DESKTOP_EXTRAS_ENABLED='true'
-    [ -z "$ARCH_LINUX_VM_SUPPORT_ENABLED" ] && ARCH_LINUX_VM_SUPPORT_ENABLED="true"
     [ -z "$ARCH_LINUX_ECN_ENABLED" ] && ARCH_LINUX_ECN_ENABLED="true"
     [ -z "$ARCH_LINUX_DESKTOP_KEYBOARD_MODEL" ] && ARCH_LINUX_DESKTOP_KEYBOARD_MODEL="pc105"
     # !!! УБРАНА СТРОКА УСТАНОВКИ ФС ПО УМОЛЧАНИЮ !!!
@@ -1641,121 +1638,42 @@ exec_install_housekeeping() {
 
 # ---------------------------------------------------------------------------------------------------
 
-exec_install_vm_support() {
-    local process_name="VM Support"
-    if [ "$ARCH_LINUX_VM_SUPPORT_ENABLED" = "true" ]; then
-        process_init "$process_name"
-        (
-            [ "$DEBUG" = "true" ] && sleep 1 && process_return 0 # If debug mode then return
-            case $(systemd-detect-virt || true) in
-            kvm)
-                log_info "KVM detected"
-                chroot_pacman_install spice spice-vdagent spice-protocol spice-gtk qemu-guest-agent
-                arch-chroot /mnt systemctl enable qemu-guest-agent
-                ;;
-            vmware)
-                log_info "VMWare Workstation/ESXi detected"
-                chroot_pacman_install open-vm-tools
-                arch-chroot /mnt systemctl enable vmtoolsd
-                arch-chroot /mnt systemctl enable vmware-vmblock-fuse
-                ;;
-            oracle)
-                log_info "VirtualBox detected"
-                chroot_pacman_install virtualbox-guest-utils
-                arch-chroot /mnt systemctl enable vboxservice
-                ;;
-            microsoft)
-                log_info "Hyper-V detected"
-                chroot_pacman_install hyperv
-                arch-chroot /mnt systemctl enable hv_fcopy_daemon
-                arch-chroot /mnt systemctl enable hv_kvp_daemon
-                arch-chroot /mnt systemctl enable hv_vss_daemon
-                ;;
-            *) log_info "No VM detected" ;; # Do nothing
-            esac
-            process_return 0 # Return
-        ) &>"$PROCESS_LOG" &
-        process_capture $! "$process_name"
-    fi
-}
-
-# ---------------------------------------------------------------------------------------------------
-
 # shellcheck disable=SC2016
 exec_finalize_arch_linux() {
     local process_name="Finalize Arch Linux"
-    local init_script_path="/mnt/home/${ARCH_LINUX_USERNAME}/${INIT_FILENAME}.sh"
-    # Используем имя хоста для создания уникального каталога инициализации
-    # Добавляем . и _init для скрытия и ясности назначения
-    local init_dir_name=".${ARCH_LINUX_HOSTNAME}_init"
-    local init_dir_path="/mnt/home/${ARCH_LINUX_USERNAME}/${init_dir_name}"
-    local target_script_path="${init_dir_path}/${INIT_FILENAME}.sh"
-    local target_log_path="${init_dir_path}/${INIT_FILENAME}.log"
-    local autostart_dir="/mnt/home/${ARCH_LINUX_USERNAME}/.config/autostart"
-    local autostart_file="${autostart_dir}/${INIT_FILENAME}.desktop"
-
-    # Проверяем, существует ли исходный скрипт инициализации
-    if [ -s "$init_script_path" ]; then
+    if [ -s "/mnt/home/${ARCH_LINUX_USERNAME}/${INIT_FILENAME}.sh" ]; then
         process_init "$process_name"
         (
             [ "$DEBUG" = "true" ] && sleep 1 && process_return 0 # If debug mode then return
-
-            log_info "Creating initialization directory: ${init_dir_path}"
-            mkdir -p "${init_dir_path}" || { log_fail "Failed creating init directory ${init_dir_path}"; exit 1; }
-            log_info "Creating autostart directory: ${autostart_dir}"
-            mkdir -p "${autostart_dir}" || { log_fail "Failed creating autostart directory ${autostart_dir}"; exit 1; }
-
-            log_info "Moving initialization script to ${target_script_path}"
-            mv "$init_script_path" "$target_script_path" || { log_fail "Failed moving init script"; exit 1; }
-
-            # Modify the target script
-            log_info "Modifying initialization script..."
+            mkdir -p "/mnt/home/${ARCH_LINUX_USERNAME}/.arch-linux/system"
+            mkdir -p "/mnt/home/${ARCH_LINUX_USERNAME}/.config/autostart"
+            mv "/mnt/home/${ARCH_LINUX_USERNAME}/${INIT_FILENAME}.sh" "/mnt/home/${ARCH_LINUX_USERNAME}/.arch-linux/system/${INIT_FILENAME}.sh"
             # Add version env
-            sed -i "1i\ARCH_LINUX_VERSION=${VERSION}" "$target_script_path" || log_warn "Failed adding version to init script"
+            sed -i "1i\ARCH_LINUX_VERSION=${VERSION}" "/mnt/home/${ARCH_LINUX_USERNAME}/.arch-linux/system/${INIT_FILENAME}.sh"
             # Add shebang
-            sed -i '1i\#!/usr/bin/env bash' "$target_script_path" || log_warn "Failed adding shebang to init script"
-            # Add autostart-remove command (referencing the correct autostart file path)
+            sed -i '1i\#!/usr/bin/env bash' "/mnt/home/${ARCH_LINUX_USERNAME}/.arch-linux/system/${INIT_FILENAME}.sh"
+            # Add autostart-remove
             {
-                echo "" # Add newline for clarity
-                echo "# exec_finalize_arch_linux | Remove autostart init file after execution"
-                # Use quotes for the path in case hostname contains special chars
-                echo "rm -f \"${autostart_file}\""
-            } >>"$target_script_path" || log_warn "Failed adding autostart removal to init script"
-            # Add Print initialized info command
+                echo "# exec_finalize_arch_linux | Remove autostart init files"
+                echo "rm -f /home/${ARCH_LINUX_USERNAME}/.config/autostart/${INIT_FILENAME}.desktop"
+            } >>"/mnt/home/${ARCH_LINUX_USERNAME}/.arch-linux/system/${INIT_FILENAME}.sh"
+            # Print initialized info
             {
-                echo "" # Add newline for clarity
-                echo "# exec_finalize_arch_linux | Print initialized info to log"
-                echo "echo \"\$(date '+%Y-%m-%d %H:%M:%S') | Arch Linux \${ARCH_LINUX_VERSION} | Post-install script executed successfully.\""
-            } >>"$target_script_path" || log_warn "Failed adding final log message to init script"
-
-            log_info "Setting execute permission on init script..."
-            arch-chroot /mnt chmod +x "/home/${ARCH_LINUX_USERNAME}/${init_dir_name}/${INIT_FILENAME}.sh" || { log_fail "Failed chmod on init script"; exit 1; }
-
-            # Create autostart desktop entry
-            log_info "Creating autostart entry: ${autostart_file}"
+                echo "# exec_finalize_arch_linux | Print initialized info"
+                echo "echo \"\$(date '+%Y-%m-%d %H:%M:%S') | Arch Linux \${ARCH_LINUX_VERSION} | Initialized\""
+            } >>"/mnt/home/${ARCH_LINUX_USERNAME}/.arch-linux/system/${INIT_FILENAME}.sh"
+            arch-chroot /mnt chmod +x "/home/${ARCH_LINUX_USERNAME}/.arch-linux/system/${INIT_FILENAME}.sh"
             {
                 echo "[Desktop Entry]"
                 echo "Type=Application"
-                echo "Name=Arch Linux Post-Install Setup" # More descriptive name
+                echo "Name=Arch Linux Initialize"
                 echo "Icon=preferences-system"
-                # Execute script and redirect output to its log file inside the specific directory
-                # Use quotes for paths
-                echo "Exec=bash -c '\"/home/${ARCH_LINUX_USERNAME}/${init_dir_name}/${INIT_FILENAME}.sh\" > \"/home/${ARCH_LINUX_USERNAME}/${init_dir_name}/${INIT_FILENAME}.log\" 2>&1'"
-                echo "Terminal=false"
-                echo "Hidden=false" # Should not be hidden initially
-                echo "NoDisplay=true" # Hide from application menus, but allow autostart
-                echo "X-GNOME-Autostart-enabled=true"
-            } >"$autostart_file" || { log_fail "Failed creating autostart file"; exit 1; }
-
-            # Set correct ownership for the user's home directory content we created/modified
-            log_info "Setting final ownership for user's home directory..."
-            arch-chroot /mnt chown -R "$ARCH_LINUX_USERNAME":"$ARCH_LINUX_USERNAME" "/home/${ARCH_LINUX_USERNAME}/${init_dir_name}" "/home/${ARCH_LINUX_USERNAME}/.config" || { log_fail "Final chown failed"; exit 1; }
-
-            process_return 0 # Return success
+                echo "Exec=bash -c '/home/${ARCH_LINUX_USERNAME}/.arch-linux/system/${INIT_FILENAME}.sh > /home/${ARCH_LINUX_USERNAME}/.arch-linux/system/${INIT_FILENAME}.log'"
+            } >"/mnt/home/${ARCH_LINUX_USERNAME}/.config/autostart/${INIT_FILENAME}.desktop"
+            arch-chroot /mnt chown -R "$ARCH_LINUX_USERNAME":"$ARCH_LINUX_USERNAME" "/home/${ARCH_LINUX_USERNAME}"
+            process_return 0 # Return
         ) &>"$PROCESS_LOG" &
         process_capture $! "$process_name"
-    else
-        log_info "No initialization script found at ${init_script_path}, skipping finalization step."
     fi
 }
 
