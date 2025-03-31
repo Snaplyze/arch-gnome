@@ -105,6 +105,7 @@ main() {
         until select_timezone; do :; done
         until select_language; do :; done
         until select_keyboard; do :; done
+        until select_reflector_countries; do :; done # <-- Добавлен вызов
         until select_disk; do :; done
         until select_filesystem; do :; done           # <-- Добавлен вызов
         echo && gum_title "Desktop Setup"
@@ -118,7 +119,6 @@ main() {
         until select_enable_bootsplash; do :; done
         until select_enable_multilib; do :; done
         until select_enable_aur; do :; done
-        until select_reflector_countries; do :; done # <-- Добавлен вызов
         until select_enable_housekeeping; do :; done
 
         # Print success
