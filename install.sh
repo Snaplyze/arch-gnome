@@ -21,7 +21,7 @@ set -E          # ERR trap inherited by shell functions (errtrace)
 : "${FORCE:=false}" # FORCE=true ./installer.sh
 
 # SCRIPT
-VERSION='1.0.0'
+VERSION='1.1.0'
 
 # GUM
 GUM_VERSION="0.13.0"
@@ -99,12 +99,14 @@ main() {
 
         # Selectors
         echo && gum_title "Core Setup"
+        until select_hostname; do :; done             # <-- Добавлен вызов
         until select_username; do :; done
         until select_password; do :; done
         until select_timezone; do :; done
         until select_language; do :; done
         until select_keyboard; do :; done
         until select_disk; do :; done
+        until select_filesystem; do :; done           # <-- Добавлен вызов
         echo && gum_title "Desktop Setup"
         until select_enable_desktop_environment; do :; done
         until select_enable_desktop_driver; do :; done
@@ -116,6 +118,7 @@ main() {
         until select_enable_bootsplash; do :; done
         until select_enable_multilib; do :; done
         until select_enable_aur; do :; done
+        until select_reflector_countries; do :; done # <-- Добавлен вызов
         until select_enable_housekeeping; do :; done
 
         # Print success
@@ -339,11 +342,12 @@ properties_generate() {
         echo "ARCH_LINUX_DISK='${ARCH_LINUX_DISK}'"
         echo "ARCH_LINUX_BOOT_PARTITION='${ARCH_LINUX_BOOT_PARTITION}'"
         echo "ARCH_LINUX_ROOT_PARTITION='${ARCH_LINUX_ROOT_PARTITION}'"
+        echo "ARCH_LINUX_FILESYSTEM='${ARCH_LINUX_FILESYSTEM}'" # <-- ДОБАВЛЕНО
         echo "ARCH_LINUX_ENCRYPTION_ENABLED='${ARCH_LINUX_ENCRYPTION_ENABLED}'"
         echo "ARCH_LINUX_TIMEZONE='${ARCH_LINUX_TIMEZONE}'"
         echo "ARCH_LINUX_LOCALE_LANG='${ARCH_LINUX_LOCALE_LANG}'"
         echo "ARCH_LINUX_LOCALE_GEN_LIST=(${ARCH_LINUX_LOCALE_GEN_LIST[*]@Q})"
-        echo "ARCH_LINUX_REFLECTOR_COUNTRY='${ARCH_LINUX_REFLECTOR_COUNTRY}'"
+        echo "ARCH_LINUX_REFLECTOR_COUNTRY='${ARCH_LINUX_REFLECTOR_COUNTRY}'" # <-- Теперь может быть список через запятую или пустой
         echo "ARCH_LINUX_VCONSOLE_KEYMAP='${ARCH_LINUX_VCONSOLE_KEYMAP}'"
         echo "ARCH_LINUX_VCONSOLE_FONT='${ARCH_LINUX_VCONSOLE_FONT}'"
         echo "ARCH_LINUX_KERNEL='${ARCH_LINUX_KERNEL}'"
@@ -367,13 +371,14 @@ properties_generate() {
 
 properties_preset_source() {
 
-    # Default presets
-    [ -z "$ARCH_LINUX_HOSTNAME" ] && ARCH_LINUX_HOSTNAME="archlyze"
+    # Default presets that are not filesystem/hostname dependent
     [ -z "$ARCH_LINUX_KERNEL" ] && ARCH_LINUX_KERNEL="linux-zen"
     [ -z "$ARCH_LINUX_DESKTOP_EXTRAS_ENABLED" ] && ARCH_LINUX_DESKTOP_EXTRAS_ENABLED='true'
     [ -z "$ARCH_LINUX_VM_SUPPORT_ENABLED" ] && ARCH_LINUX_VM_SUPPORT_ENABLED="true"
     [ -z "$ARCH_LINUX_ECN_ENABLED" ] && ARCH_LINUX_ECN_ENABLED="true"
     [ -z "$ARCH_LINUX_DESKTOP_KEYBOARD_MODEL" ] && ARCH_LINUX_DESKTOP_KEYBOARD_MODEL="pc105"
+    # Default filesystem if not set
+    [ -z "$ARCH_LINUX_FILESYSTEM" ] && ARCH_LINUX_FILESYSTEM="ext4"
 
     # Set microcode
     [ -z "$ARCH_LINUX_MICROCODE" ] && grep -E "GenuineIntel" &>/dev/null <<<"$(lscpu)" && ARCH_LINUX_MICROCODE="intel-ucode"
@@ -412,8 +417,9 @@ properties_preset_source() {
             ARCH_LINUX_AUR_HELPER='paru'
         fi
 
-        # Write properties
-        properties_source
+        # Write properties (generate an initial file based on presets)
+        properties_generate # Generate file AFTER applying preset logic
+        properties_source   # Source the newly generated file
         gum join "$(gum_green --bold "• ")" "$(gum_white "Setup preset loaded for: ")" "$(gum_white --bold "$preset")"
     fi
     return 0
@@ -422,6 +428,24 @@ properties_preset_source() {
 # ////////////////////////////////////////////////////////////////////////////////////////////////////
 # SELECTORS
 # ////////////////////////////////////////////////////////////////////////////////////////////////////
+
+select_hostname() {
+    if [ -z "$ARCH_LINUX_HOSTNAME" ]; then
+        local user_input
+        # Предлагаем дефолт, но позволяем изменить
+        user_input=$(gum_input --header "+ Enter Hostname" --value "archlinux") || trap_gum_exit_confirm
+        # Простая валидация (не пустое, без пробелов, без кавычек)
+        if [ -z "$user_input" ] || [[ "$user_input" =~ \ |\'|\" ]]; then
+             gum_confirm --affirmative="Ok" --negative="" "Invalid hostname: '${user_input}'. Cannot be empty or contain spaces/quotes."
+             return 1
+        fi
+        ARCH_LINUX_HOSTNAME="$user_input" && properties_generate
+    fi
+    gum_property "Hostname" "$ARCH_LINUX_HOSTNAME"
+    return 0
+}
+
+# ---------------------------------------------------------------------------------------------------
 
 select_username() {
     if [ -z "$ARCH_LINUX_USERNAME" ]; then
@@ -536,6 +560,75 @@ select_disk() {
         properties_generate # Generate properties file
     fi
     gum_property "Disk" "$ARCH_LINUX_DISK"
+    return 0
+}
+
+# ---------------------------------------------------------------------------------------------------
+
+select_filesystem() {
+    if [ -z "$ARCH_LINUX_FILESYSTEM" ]; then
+        local options=("ext4 (default)" "btrfs (with subvolumes)")
+        local user_input
+        user_input=$(gum_choose --header "+ Choose Filesystem" "${options[@]}") || trap_gum_exit_confirm
+        [ -z "$user_input" ] && return 1 # User cancelled
+        user_input="$(echo "$user_input" | awk '{print $1}')" # Получаем только имя ФС (ext4 или btrfs)
+        ARCH_LINUX_FILESYSTEM="$user_input" && properties_generate
+    fi
+    gum_property "Filesystem" "$ARCH_LINUX_FILESYSTEM"
+    return 0
+}
+
+# ---------------------------------------------------------------------------------------------------
+
+select_reflector_countries() {
+    # Если значение уже задано в installer.conf, просто показываем его
+    if [ -n "$ARCH_LINUX_REFLECTOR_COUNTRY" ]; then
+        gum_property "Reflector Countries" "$ARCH_LINUX_REFLECTOR_COUNTRY"
+        return 0
+    fi
+
+    # Получаем список стран от reflector
+    local countries_list=()
+    local country_item
+    gum_spin --title "Fetching country list from reflector..." -- mapfile -t countries_list < <(reflector --list-countries 2>/dev/null)
+
+    if [ ${#countries_list[@]} -eq 0 ]; then
+        log_warn "Could not fetch country list from reflector. Skipping selection."
+        gum_warn "Could not fetch country list from reflector. Using global mirrors."
+        ARCH_LINUX_REFLECTOR_COUNTRY="" # Оставляем пустым для глобального поиска
+        properties_generate # Сохраняем пустую переменную
+        gum_property "Reflector Countries" "(Global)"
+        return 0
+    fi
+
+    # Используем gum filter для выбора одной или нескольких стран
+    local selected_countries_array=()
+    local header_txt="+ Choose Mirror Countries (Space to select, Enter to confirm)"
+    # Сортируем список стран для удобства
+    mapfile -t sorted_countries_list < <(printf "%s\n" "${countries_list[@]}" | sort)
+    mapfile -t selected_countries_array < <(gum filter --no-limit --height 15 --header "$header_txt" "${sorted_countries_list[@]}") || trap_gum_exit_confirm
+
+    # Проверяем, выбрал ли пользователь что-то
+    if [ ${#selected_countries_array[@]} -eq 0 ]; then
+         # Предлагаем использовать глобальные зеркала или попробовать снова
+        if gum_confirm "No countries selected. Use global mirrors (recommended) or try again?" --affirmative="Use Global" --negative="Try Again"; then
+            ARCH_LINUX_REFLECTOR_COUNTRY="" && properties_generate
+            gum_property "Reflector Countries" "(Global)"
+            return 0 # Выбор сделан (глобальный)
+        else
+            return 1 # Возвращаем ошибку, чтобы until в main сработал и выбор повторился
+        fi
+    fi
+
+    # Преобразуем массив выбранных стран в строку, разделенную запятыми
+    local selected_countries_string
+    selected_countries_string=$(printf "%s," "${selected_countries_array[@]}")
+    selected_countries_string=${selected_countries_string%,} # Убираем последнюю запятую
+
+    # Сохраняем результат
+    ARCH_LINUX_REFLECTOR_COUNTRY="$selected_countries_string" && properties_generate
+
+    gum_property "Reflector Countries" "$ARCH_LINUX_REFLECTOR_COUNTRY"
     return 0
 }
 
@@ -773,33 +866,81 @@ exec_prepare_disk() {
     (
         [ "$DEBUG" = "true" ] && sleep 1 && process_return 0 # If debug mode then return
 
-        # Wipe and create partitions
-        wipefs -af "$ARCH_LINUX_DISK"                                        # Remove All Filesystem Signatures
-        sgdisk --zap-all "$ARCH_LINUX_DISK"                                  # Remove the Partition Table
-        sgdisk -o "$ARCH_LINUX_DISK"                                         # Create new GPT partition table
-        sgdisk -n 1:0:+1G -t 1:ef00 -c 1:boot --align-end "$ARCH_LINUX_DISK" # Create partition /boot efi partition: 1 GiB
-        sgdisk -n 2:0:0 -t 2:8300 -c 2:root --align-end "$ARCH_LINUX_DISK"   # Create partition / partition: Rest of space
-        partprobe "$ARCH_LINUX_DISK"                                         # Reload partition table
+        # Wipe and create partitions (Standard EFI + Root)
+        log_info "Wiping disk ${ARCH_LINUX_DISK}..."
+        wipefs -af "$ARCH_LINUX_DISK" || { log_fail "wipefs failed"; exit 1; }
+        sgdisk --zap-all "$ARCH_LINUX_DISK" || { log_fail "sgdisk --zap-all failed"; exit 1; }
+        log_info "Creating GPT partitions on ${ARCH_LINUX_DISK}..."
+        sgdisk -o "$ARCH_LINUX_DISK" || { log_fail "sgdisk -o failed"; exit 1; }
+        # Partition 1: EFI System Partition (ESP)
+        sgdisk -n 1:0:+1G -t 1:ef00 -c 1:boot --align-end "$ARCH_LINUX_DISK" || { log_fail "sgdisk create boot failed"; exit 1; }
+        # Partition 2: Linux Root
+        sgdisk -n 2:0:0 -t 2:8300 -c 2:root --align-end "$ARCH_LINUX_DISK" || { log_fail "sgdisk create root failed"; exit 1; }
+        partprobe "$ARCH_LINUX_DISK" || { log_warn "partprobe failed, continuing..."; }
+        sleep 2 # Give kernel time to recognize partitions
 
-        # Disk encryption
+        # Verify partitions exist
+        [ ! -b "$ARCH_LINUX_BOOT_PARTITION" ] && { log_fail "Boot partition $ARCH_LINUX_BOOT_PARTITION not found"; exit 1; }
+        [ ! -b "$ARCH_LINUX_ROOT_PARTITION" ] && { log_fail "Root partition $ARCH_LINUX_ROOT_PARTITION not found"; exit 1; }
+
+        # Disk encryption setup
+        local root_device="$ARCH_LINUX_ROOT_PARTITION" # Device to format/mount as root
         if [ "$ARCH_LINUX_ENCRYPTION_ENABLED" = "true" ]; then
-            log_info "Enable Disk Encryption for ${ARCH_LINUX_ROOT_PARTITION}"
-            echo -n "$ARCH_LINUX_PASSWORD" | cryptsetup luksFormat "$ARCH_LINUX_ROOT_PARTITION"
-            echo -n "$ARCH_LINUX_PASSWORD" | cryptsetup open "$ARCH_LINUX_ROOT_PARTITION" cryptroot
+            log_info "Setting up LUKS encryption on ${ARCH_LINUX_ROOT_PARTITION}..."
+            echo -n "$ARCH_LINUX_PASSWORD" | cryptsetup luksFormat "$ARCH_LINUX_ROOT_PARTITION" -q || { log_fail "cryptsetup luksFormat failed"; exit 1; }
+            echo -n "$ARCH_LINUX_PASSWORD" | cryptsetup open "$ARCH_LINUX_ROOT_PARTITION" cryptroot -q || { log_fail "cryptsetup open failed"; exit 1; }
+            root_device="/dev/mapper/cryptroot"
+            log_info "LUKS device opened at ${root_device}"
         fi
 
-        # Format disk
-        mkfs.fat -F 32 -n BOOT "$ARCH_LINUX_BOOT_PARTITION"
-        [ "$ARCH_LINUX_ENCRYPTION_ENABLED" = "true" ] && mkfs.ext4 -F -L ROOT /dev/mapper/cryptroot
-        [ "$ARCH_LINUX_ENCRYPTION_ENABLED" = "false" ] && mkfs.ext4 -F -L ROOT "$ARCH_LINUX_ROOT_PARTITION"
+        # Format EFI partition
+        log_info "Formatting EFI partition ${ARCH_LINUX_BOOT_PARTITION} as FAT32..."
+        mkfs.fat -F 32 -n BOOT "$ARCH_LINUX_BOOT_PARTITION" || { log_fail "mkfs.fat failed"; exit 1; }
 
-        # Mount disk to /mnt
-        [ "$ARCH_LINUX_ENCRYPTION_ENABLED" = "true" ] && mount -v /dev/mapper/cryptroot /mnt
-        [ "$ARCH_LINUX_ENCRYPTION_ENABLED" = "false" ] && mount -v "$ARCH_LINUX_ROOT_PARTITION" /mnt
-        mkdir -p /mnt/boot
-        mount -v "$ARCH_LINUX_BOOT_PARTITION" /mnt/boot
+        # --- Filesystem Specific Formatting and Mounting ---
+        if [ "$ARCH_LINUX_FILESYSTEM" = "btrfs" ]; then
+            log_info "Formatting ${root_device} with Btrfs..."
+            mkfs.btrfs -f -L ROOT "$root_device" || { log_fail "mkfs.btrfs failed"; exit 1; }
 
-        # Return
+            log_info "Mounting Btrfs top-level volume to create subvolumes..."
+            local btrfs_mount_opts="rw,noatime,compress=zstd:3,ssd,space_cache=v2,discard=async" # Common options
+            mount -t btrfs -o "${btrfs_mount_opts}" "$root_device" /mnt || { log_fail "Initial Btrfs mount failed"; exit 1; }
+
+            log_info "Creating Btrfs subvolumes..."
+            btrfs subvolume create /mnt/@ || { log_fail "Failed creating subvolume @"; exit 1; }
+            btrfs subvolume create /mnt/@home || { log_fail "Failed creating subvolume @home"; exit 1; }
+            btrfs subvolume create /mnt/@var_log || { log_fail "Failed creating subvolume @var_log"; exit 1; }
+            btrfs subvolume create /mnt/@pkg || { log_fail "Failed creating subvolume @pkg"; exit 1; } # Pacman cache
+            btrfs subvolume create /mnt/@snapshots || { log_fail "Failed creating subvolume @snapshots"; exit 1; } # For snapper/timeshift
+
+            log_info "Unmounting Btrfs top-level volume..."
+            umount /mnt || { log_fail "Unmounting Btrfs top-level failed"; exit 1; }
+
+            log_info "Mounting Btrfs subvolumes..."
+            mount -t btrfs -o "${btrfs_mount_opts},subvol=@" "$root_device" /mnt || { log_fail "Mounting @ failed"; exit 1; }
+            # Create mount points for other subvolumes within the root subvolume mount
+            mkdir -p /mnt/{boot,home,var/log,var/cache/pacman/pkg,.snapshots} || { log_fail "Failed creating subvolume mountpoints"; exit 1; }
+            mount -t btrfs -o "${btrfs_mount_opts},subvol=@home" "$root_device" /mnt/home || { log_fail "Mounting @home failed"; exit 1; }
+            mount -t btrfs -o "${btrfs_mount_opts},subvol=@var_log" "$root_device" /mnt/var/log || { log_fail "Mounting @var_log failed"; exit 1; }
+            mount -t btrfs -o "${btrfs_mount_opts},subvol=@pkg" "$root_device" /mnt/var/cache/pacman/pkg || { log_fail "Mounting @pkg failed"; exit 1; }
+            mount -t btrfs -o "${btrfs_mount_opts},subvol=@snapshots" "$root_device" /mnt/.snapshots || { log_fail "Mounting @snapshots failed"; exit 1; }
+
+            # Mount EFI partition inside the root mount
+            mount "$ARCH_LINUX_BOOT_PARTITION" /mnt/boot || { log_fail "Mounting EFI partition failed"; exit 1; }
+            log_info "Btrfs subvolumes mounted successfully."
+
+        else # Default to ext4
+            log_info "Formatting ${root_device} with Ext4..."
+            mkfs.ext4 -F -L ROOT "$root_device" || { log_fail "mkfs.ext4 failed"; exit 1; }
+            log_info "Mounting Ext4 volume..."
+            mount "$root_device" /mnt || { log_fail "Mounting ext4 root failed"; exit 1; }
+            mkdir -p /mnt/boot || { log_fail "Creating /mnt/boot failed"; exit 1; }
+            mount "$ARCH_LINUX_BOOT_PARTITION" /mnt/boot || { log_fail "Mounting EFI partition failed"; exit 1; }
+            log_info "Ext4 volume mounted successfully."
+        fi
+        # --- End Filesystem Specific ---
+
+        # Return success
         process_return 0
     ) &>"$PROCESS_LOG" &
     process_capture $! "$process_name"
@@ -813,148 +954,194 @@ exec_pacstrap_core() {
     (
         [ "$DEBUG" = "true" ] && sleep 1 && process_return 0 # If debug mode then return
 
-        # Core packages
+        # Core packages (btrfs-progs is usually in base, but ensuring it)
         local packages=("$ARCH_LINUX_KERNEL" base sudo linux-firmware zram-generator networkmanager)
+        [ "$ARCH_LINUX_FILESYSTEM" = "btrfs" ] && packages+=(btrfs-progs) # Ensure btrfs tools are installed
 
         # Add microcode package
         [ -n "$ARCH_LINUX_MICROCODE" ] && [ "$ARCH_LINUX_MICROCODE" != "none" ] && packages+=("$ARCH_LINUX_MICROCODE")
 
         # Install core packages and initialize an empty pacman keyring in the target
-        pacstrap -K /mnt "${packages[@]}"
+        log_info "Running pacstrap with packages: ${packages[*]}"
+        pacstrap -K /mnt "${packages[@]}" || { log_fail "Pacstrap failed"; exit 1; }
 
-        # Generate /etc/fstab
-        genfstab -U /mnt >>/mnt/etc/fstab
+        # Generate /etc/fstab (should work correctly for btrfs subvolumes now)
+        log_info "Generating fstab..."
+        genfstab -U /mnt >>/mnt/etc/fstab || { log_fail "genfstab failed"; exit 1; }
+        # Optional: Add 'autodefrag' for Btrfs on non-SSD mounts if desired (careful with SSDs)
+        # if [ "$ARCH_LINUX_FILESYSTEM" = "btrfs" ]; then
+        #    sed -i '/btrfs/s/defaults/defaults,autodefrag/' /mnt/etc/fstab
+        # fi
 
         # Set timezone & system clock
-        arch-chroot /mnt ln -sf "/usr/share/zoneinfo/${ARCH_LINUX_TIMEZONE}" /etc/localtime
-        arch-chroot /mnt hwclock --systohc # Set hardware clock from system clock
+        log_info "Setting timezone and clock..."
+        arch-chroot /mnt ln -sf "/usr/share/zoneinfo/${ARCH_LINUX_TIMEZONE}" /etc/localtime || { log_fail "Failed to set timezone link"; exit 1; }
+        arch-chroot /mnt hwclock --systohc || { log_warn "hwclock --systohc failed"; } # Usually not critical
 
-        { # Create swap (zram-generator with zstd compression)
-            # https://wiki.archlinux.org/title/Zram#Using_zram-generator
+        # Create swap (zram-generator with zstd compression)
+        log_info "Configuring zram..."
+        {
             echo '[zram0]'
-            echo 'zram-size = min(ram / 2, 4096)'
+            echo 'zram-size = min(ram / 2, 4096)' # Consider making this configurable or smarter
             echo 'compression-algorithm = zstd'
-        } >/mnt/etc/systemd/zram-generator.conf
-
-        { # Optimize swap on zram (https://wiki.archlinux.org/title/Zram#Optimizing_swap_on_zram)
+        } >/mnt/etc/systemd/zram-generator.conf || { log_fail "Failed writing zram config"; exit 1; }
+        { # Optimize swap on zram
             echo 'vm.swappiness = 180'
             echo 'vm.watermark_boost_factor = 0'
             echo 'vm.watermark_scale_factor = 125'
             echo 'vm.page-cluster = 0'
-        } >/mnt/etc/sysctl.d/99-vm-zram-parameters.conf
+        } >/mnt/etc/sysctl.d/99-vm-zram-parameters.conf || { log_fail "Failed writing zram sysctl params"; exit 1; }
 
         # Set console keymap in /etc/vconsole.conf
-        echo "KEYMAP=$ARCH_LINUX_VCONSOLE_KEYMAP" >/mnt/etc/vconsole.conf
+        log_info "Setting vconsole keymap..."
+        echo "KEYMAP=$ARCH_LINUX_VCONSOLE_KEYMAP" >/mnt/etc/vconsole.conf || { log_fail "Failed writing vconsole.conf"; exit 1; }
         [ -n "$ARCH_LINUX_VCONSOLE_FONT" ] && echo "FONT=$ARCH_LINUX_VCONSOLE_FONT" >>/mnt/etc/vconsole.conf
 
         # Set & Generate Locale
-        echo "LANG=${ARCH_LINUX_LOCALE_LANG}.UTF-8" >/mnt/etc/locale.conf
-        for ((i = 0; i < ${#ARCH_LINUX_LOCALE_GEN_LIST[@]}; i++)); do sed -i "s/^#${ARCH_LINUX_LOCALE_GEN_LIST[$i]}/${ARCH_LINUX_LOCALE_GEN_LIST[$i]}/g" "/mnt/etc/locale.gen"; done
-        arch-chroot /mnt locale-gen
+        log_info "Setting and generating locale..."
+        echo "LANG=${ARCH_LINUX_LOCALE_LANG}.UTF-8" >/mnt/etc/locale.conf || { log_fail "Failed writing locale.conf"; exit 1; }
+        for ((i = 0; i < ${#ARCH_LINUX_LOCALE_GEN_LIST[@]}; i++)); do
+             sed -i "s/^#\(${ARCH_LINUX_LOCALE_GEN_LIST[$i]}\)/\1/g" "/mnt/etc/locale.gen" || log_warn "Failed to uncomment locale ${ARCH_LINUX_LOCALE_GEN_LIST[$i]}"
+        done
+        arch-chroot /mnt locale-gen || { log_fail "locale-gen failed"; exit 1; }
 
         # Set hostname & hosts
-        echo "$ARCH_LINUX_HOSTNAME" >/mnt/etc/hostname
+        log_info "Setting hostname and hosts file..."
+        echo "$ARCH_LINUX_HOSTNAME" >/mnt/etc/hostname || { log_fail "Failed writing hostname"; exit 1; }
         {
             echo '# <ip>     <hostname.domain.org>  <hostname>'
             echo '127.0.0.1  localhost.localdomain  localhost'
             echo '::1        localhost.localdomain  localhost'
-        } >/mnt/etc/hosts
+            # Add the new hostname
+            echo "127.0.1.1  ${ARCH_LINUX_HOSTNAME}.localdomain ${ARCH_LINUX_HOSTNAME}"
+        } >/mnt/etc/hosts || { log_fail "Failed writing hosts file"; exit 1; }
 
-        # Create initial ramdisk from /etc/mkinitcpio.conf
-        # https://wiki.archlinux.org/title/Mkinitcpio#Common_hooks
-        # https://wiki.archlinux.org/title/Microcode#mkinitcpio
-        [ "$ARCH_LINUX_ENCRYPTION_ENABLED" = "true" ] && sed -i "s/^HOOKS=(.*)$/HOOKS=(base systemd keyboard autodetect microcode modconf sd-vconsole block sd-encrypt filesystems fsck)/" /mnt/etc/mkinitcpio.conf
-        [ "$ARCH_LINUX_ENCRYPTION_ENABLED" = "false" ] && sed -i "s/^HOOKS=(.*)$/HOOKS=(base systemd keyboard autodetect microcode modconf sd-vconsole block filesystems fsck)/" /mnt/etc/mkinitcpio.conf
-        arch-chroot /mnt mkinitcpio -P
+        # --- mkinitcpio HOOKS Setup ---
+        # Base hooks common to both ext4 and btrfs
+        local mkinitcpio_hooks="base systemd keyboard autodetect modconf block filesystems fsck"
+        # Add sd-vconsole if console font is set
+        [ -n "$ARCH_LINUX_VCONSOLE_FONT" ] && mkinitcpio_hooks="base systemd keyboard autodetect sd-vconsole modconf block filesystems fsck"
+        # Add encryption hook if enabled
+        [ "$ARCH_LINUX_ENCRYPTION_ENABLED" = "true" ] && mkinitcpio_hooks="base systemd keyboard autodetect modconf block sd-encrypt filesystems fsck"
+        [ "$ARCH_LINUX_ENCRYPTION_ENABLED" = "true" ] && [ -n "$ARCH_LINUX_VCONSOLE_FONT" ] && mkinitcpio_hooks="base systemd keyboard autodetect sd-vconsole modconf block sd-encrypt filesystems fsck"
+        # Add microcode hook (always)
+        mkinitcpio_hooks=$(echo "$mkinitcpio_hooks" | sed 's/autodetect/autodetect microcode/')
+        # Note: Plymouth hook is added later in exec_install_bootsplash if enabled
+
+        log_info "Setting mkinitcpio HOOKS: $mkinitcpio_hooks"
+        sed -i "s/^HOOKS=(.*)$/HOOKS=($mkinitcpio_hooks)/" /mnt/etc/mkinitcpio.conf || { log_fail "Failed to set mkinitcpio hooks"; exit 1; }
+        # --- End mkinitcpio HOOKS Setup ---
+
+        # Create initial ramdisk (Plymouth will trigger another rebuild later if enabled)
+        log_info "Generating initial ramdisk (mkinitcpio -P)..."
+        arch-chroot /mnt mkinitcpio -P || { log_fail "mkinitcpio -P failed"; exit 1; }
 
         # Install Bootloader to /boot (systemdboot)
-        arch-chroot /mnt bootctl --esp-path=/boot install # Install systemdboot to /boot
+        log_info "Installing systemd-boot..."
+        arch-chroot /mnt bootctl --esp-path=/boot install || { log_fail "bootctl install failed"; exit 1; }
 
-        # Kernel args
-        # Zswap should be disabled when using zram (https://github.com/archlinux/archinstall/issues/881)
-        # Silent boot: https://wiki.archlinux.org/title/Silent_boot
+        # --- Kernel args ---
+        log_info "Configuring bootloader entries..."
         local kernel_args=()
-        [ "$ARCH_LINUX_ENCRYPTION_ENABLED" = "true" ] && kernel_args+=("rd.luks.name=$(blkid -s UUID -o value "${ARCH_LINUX_ROOT_PARTITION}")=cryptroot" "root=/dev/mapper/cryptroot")
-        [ "$ARCH_LINUX_ENCRYPTION_ENABLED" = "false" ] && kernel_args+=("root=PARTUUID=$(lsblk -dno PARTUUID "${ARCH_LINUX_ROOT_PARTITION}")")
-        kernel_args+=('rw' 'init=/usr/lib/systemd/systemd' 'zswap.enabled=0')
+        # Root device definition
+        if [ "$ARCH_LINUX_ENCRYPTION_ENABLED" = "true" ]; then
+            local luks_uuid
+            luks_uuid=$(blkid -s UUID -o value "${ARCH_LINUX_ROOT_PARTITION}") || { log_fail "Failed getting LUKS UUID"; exit 1; }
+            kernel_args+=("rd.luks.name=${luks_uuid}=cryptroot" "root=/dev/mapper/cryptroot")
+        else
+             local part_uuid
+             part_uuid=$(blkid -s PARTUUID -o value "${ARCH_LINUX_ROOT_PARTITION}") || { log_fail "Failed getting PARTUUID"; exit 1; }
+             kernel_args+=("root=PARTUUID=${part_uuid}")
+        fi
+        # Filesystem specific root flags
+        [ "$ARCH_LINUX_FILESYSTEM" = "btrfs" ] && kernel_args+=("rootflags=subvol=@") # For btrfs root subvolume
+        # Common options
+        kernel_args+=('rw' 'init=/usr/lib/systemd/systemd' 'zswap.enabled=0') # Disable zswap when using zram
+        # Nvidia Early KMS flag
+        [ "$ARCH_LINUX_DESKTOP_GRAPHICS_DRIVER" = "nvidia" ] && kernel_args+=("nvidia_drm.modeset=1")
+        # Tweaks and silent boot options
         [ "$ARCH_LINUX_CORE_TWEAKS_ENABLED" = "true" ] && kernel_args+=('nowatchdog')
         [ "$ARCH_LINUX_BOOTSPLASH_ENABLED" = "true" ] || [ "$ARCH_LINUX_CORE_TWEAKS_ENABLED" = "true" ] && kernel_args+=('quiet' 'splash' 'vt.global_cursor_default=0')
+        log_info "Kernel parameters: ${kernel_args[*]}"
+        # --- End Kernel args ---
 
-        { # Create Bootloader config
+        # Create Bootloader config
+        {
             echo 'default arch.conf'
             echo 'console-mode auto'
-            echo 'timeout 0'
+            echo 'timeout 3' # Slightly increased timeout
             echo 'editor yes'
-        } >/mnt/boot/loader/loader.conf
+        } >/mnt/boot/loader/loader.conf || { log_fail "Failed writing loader.conf"; exit 1; }
 
-        { # Create default boot entry
+        # Create default boot entry
+        {
             echo 'title   Arch Linux'
             echo "linux   /vmlinuz-${ARCH_LINUX_KERNEL}"
+            [ -n "$ARCH_LINUX_MICROCODE" ] && [ "$ARCH_LINUX_MICROCODE" != "none" ] && echo "initrd  /${ARCH_LINUX_MICROCODE}.img"
             echo "initrd  /initramfs-${ARCH_LINUX_KERNEL}.img"
             echo "options ${kernel_args[*]}"
-        } >/mnt/boot/loader/entries/arch.conf
+        } >/mnt/boot/loader/entries/arch.conf || { log_fail "Failed writing arch.conf"; exit 1; }
 
-        { # Create fallback boot entry
+        # Create fallback boot entry
+        {
             echo 'title   Arch Linux (Fallback)'
             echo "linux   /vmlinuz-${ARCH_LINUX_KERNEL}"
+             [ -n "$ARCH_LINUX_MICROCODE" ] && [ "$ARCH_LINUX_MICROCODE" != "none" ] && echo "initrd  /${ARCH_LINUX_MICROCODE}.img"
             echo "initrd  /initramfs-${ARCH_LINUX_KERNEL}-fallback.img"
             echo "options ${kernel_args[*]}"
-        } >/mnt/boot/loader/entries/arch-fallback.conf
+        } >/mnt/boot/loader/entries/arch-fallback.conf || { log_fail "Failed writing arch-fallback.conf"; exit 1; }
 
         # Create new user
-        arch-chroot /mnt useradd -m -G wheel -s /bin/bash "$ARCH_LINUX_USERNAME"
+        log_info "Creating user ${ARCH_LINUX_USERNAME}..."
+        arch-chroot /mnt useradd -m -G wheel -s /bin/bash "$ARCH_LINUX_USERNAME" || { log_fail "useradd failed"; exit 1; }
 
-        # Create user dirs
+        # Create user dirs (redundant with useradd -m, but ensures .config/.local exist)
         mkdir -p "/mnt/home/${ARCH_LINUX_USERNAME}/.config"
         mkdir -p "/mnt/home/${ARCH_LINUX_USERNAME}/.local/share"
         arch-chroot /mnt chown -R "$ARCH_LINUX_USERNAME":"$ARCH_LINUX_USERNAME" "/home/${ARCH_LINUX_USERNAME}"
 
         # Allow users in group wheel to use sudo
-        sed -i 's^# %wheel ALL=(ALL:ALL) ALL^%wheel ALL=(ALL:ALL) ALL^g' /mnt/etc/sudoers
+        log_info "Configuring sudo..."
+        sed -i 's/^# \(%wheel ALL=(ALL:ALL) ALL\)/\1/' /mnt/etc/sudoers || log_warn "Failed to uncomment wheel group in sudoers"
 
         # Change passwords
-        printf "%s\n%s" "${ARCH_LINUX_PASSWORD}" "${ARCH_LINUX_PASSWORD}" | arch-chroot /mnt passwd
-        printf "%s\n%s" "${ARCH_LINUX_PASSWORD}" "${ARCH_LINUX_PASSWORD}" | arch-chroot /mnt passwd "$ARCH_LINUX_USERNAME"
+        log_info "Setting passwords..."
+        printf "%s\n%s" "${ARCH_LINUX_PASSWORD}" "${ARCH_LINUX_PASSWORD}" | arch-chroot /mnt passwd root || { log_fail "Failed setting root password"; exit 1; }
+        printf "%s\n%s" "${ARCH_LINUX_PASSWORD}" "${ARCH_LINUX_PASSWORD}" | arch-chroot /mnt passwd "$ARCH_LINUX_USERNAME" || { log_fail "Failed setting user password"; exit 1; }
 
         # Enable services
-        arch-chroot /mnt systemctl enable NetworkManager                   # Network Manager
-        arch-chroot /mnt systemctl enable fstrim.timer                     # SSD support
-        arch-chroot /mnt systemctl enable systemd-zram-setup@zram0.service # Swap (zram-generator)
-        arch-chroot /mnt systemctl enable systemd-oomd.service             # Out of memory killer (swap is required)
-        arch-chroot /mnt systemctl enable systemd-boot-update.service      # Auto bootloader update
-        arch-chroot /mnt systemctl enable systemd-timesyncd.service        # Sync time from internet after boot
+        log_info "Enabling core system services..."
+        arch-chroot /mnt systemctl enable NetworkManager.service || log_warn "Failed enabling NetworkManager"
+        arch-chroot /mnt systemctl enable fstrim.timer || log_warn "Failed enabling fstrim.timer" # Only relevant for SSDs
+        arch-chroot /mnt systemctl enable systemd-zram-setup@zram0.service || log_warn "Failed enabling zram"
+        arch-chroot /mnt systemctl enable systemd-oomd.service || log_warn "Failed enabling oomd" # Requires swap
+        arch-chroot /mnt systemctl enable systemd-boot-update.service || log_warn "Failed enabling boot-update"
+        arch-chroot /mnt systemctl enable systemd-timesyncd.service || log_warn "Failed enabling timesyncd"
 
         # Make some Arch Linux tweaks
         if [ "$ARCH_LINUX_CORE_TWEAKS_ENABLED" = "true" ]; then
-
+            log_info "Applying core tweaks..."
             # Add password feedback
-            echo -e "\n## Enable sudo password feedback\nDefaults pwfeedback" >>/mnt/etc/sudoers
-
-            # Configure pacman parrallel downloads, colors, eyecandy
-            sed -i 's/^#ParallelDownloads/ParallelDownloads/' /mnt/etc/pacman.conf
-            sed -i 's/^#Color/Color\nILoveCandy/' /mnt/etc/pacman.conf
-
+            grep -q "Defaults pwfeedback" /mnt/etc/sudoers || echo -e "\n## Enable sudo password feedback\nDefaults pwfeedback" >>/mnt/etc/sudoers
+            # Configure pacman parallel downloads, colors, eyecandy
+            sed -i 's/^#\(ParallelDownloads\)/\1/' /mnt/etc/pacman.conf
+            grep -q "ILoveCandy" /mnt/etc/pacman.conf || sed -i '/^#Color/a ILoveCandy' /mnt/etc/pacman.conf
+            sed -i 's/^#\(Color\)/\1/' /mnt/etc/pacman.conf
             # Disable watchdog modules
             mkdir -p /mnt/etc/modprobe.d/
             echo 'blacklist sp5100_tco' >>/mnt/etc/modprobe.d/blacklist-watchdog.conf
             echo 'blacklist iTCO_wdt' >>/mnt/etc/modprobe.d/blacklist-watchdog.conf
-
             # Disable debug packages when using makepkg
-            sed -i '/OPTIONS=.*!debug/!s/\(OPTIONS=.*\)debug/\1!debug/' /mnt/etc/makepkg.conf
-
-            # Set max VMAs (need for some apps/games)
-            #echo vm.max_map_count=1048576 >/mnt/etc/sysctl.d/vm.max_map_count.conf
-
-            # Reduce shutdown timeout
-            #sed -i "s/^\s*#\s*DefaultTimeoutStopSec=.*/DefaultTimeoutStopSec=10s/" /mnt/etc/systemd/system.conf
+            sed -i '/^OPTIONS=/s/debug/!debug/' /mnt/etc/makepkg.conf
+            # Reduce shutdown timeout (Optional, can be aggressive)
+            # sed -i "s/^\s*#\s*DefaultTimeoutStopSec=.*/DefaultTimeoutStopSec=10s/" /mnt/etc/systemd/system.conf
         fi
 
-        # Return
+        # Return success
         process_return 0
     ) &>"$PROCESS_LOG" &
     process_capture $! "$process_name"
 }
-
 # ---------------------------------------------------------------------------------------------------
 
 exec_install_desktop() {
@@ -1297,11 +1484,53 @@ exec_install_bootsplash() {
     if [ "$ARCH_LINUX_BOOTSPLASH_ENABLED" = "true" ]; then
         process_init "$process_name"
         (
-            [ "$DEBUG" = "true" ] && sleep 1 && process_return 0                                       # If debug mode then return
-            chroot_pacman_install plymouth git base-devel                                              # Install packages
-            sed -i "s/base systemd keyboard/base systemd plymouth keyboard/g" /mnt/etc/mkinitcpio.conf # Configure mkinitcpio
-            arch-chroot /mnt plymouth-set-default-theme -R bgrt                                     # Set Theme & rebuild initram disk
-            process_return 0                                                                           # Return
+            [ "$DEBUG" = "true" ] && sleep 1 && process_return 0
+            log_info "Installing Plymouth packages..."
+            chroot_pacman_install plymouth git base-devel || { log_fail "Failed to install plymouth packages"; exit 1; }
+
+            # --- Более надежное добавление хука plymouth ---
+            log_info "Adding plymouth hook to mkinitcpio.conf..."
+            local mkinitcpio_conf="/mnt/etc/mkinitcpio.conf"
+            local current_hooks_line
+            current_hooks_line=$(grep '^HOOKS=' "$mkinitcpio_conf") || { log_fail "Could not find HOOKS line in $mkinitcpio_conf"; exit 1; }
+            local current_hooks
+            current_hooks=$(echo "$current_hooks_line" | sed 's/HOOKS=(\(.*\))/\1/')
+
+            # Определить, после какого хука вставить plymouth
+            local insert_after="block"
+            # Если есть sd-encrypt, вставляем после него
+            [[ $current_hooks == *"sd-encrypt"* ]] && insert_after="sd-encrypt"
+
+            # Сформировать новые хуки, если plymouth еще не добавлен
+            local new_hooks="$current_hooks"
+            if [[ $current_hooks != *"plymouth"* ]]; then
+                # Используем awk для вставки после нужного хука
+                 new_hooks=$(echo "$current_hooks" | awk -v hook_to_add="plymouth" -v after_hook="$insert_after" '{
+                    output="";
+                    for (i=1; i<=NF; i++) {
+                        output = output $i " ";
+                        if ($i == after_hook) {
+                            output = output hook_to_add " ";
+                        }
+                    }
+                    # Убираем лишний пробел в конце
+                    sub(/ $/, "", output);
+                    print output;
+                }')
+                log_info "New hooks string: $new_hooks"
+                 # Заменить старую строку HOOKS на новую
+                sed -i "s/^HOOKS=.*/HOOKS=($new_hooks)/" "$mkinitcpio_conf" || { log_fail "Failed to update HOOKS in $mkinitcpio_conf"; exit 1; }
+                log_info "Successfully added plymouth hook after $insert_after."
+            else
+                 log_warn "Plymouth hook already present in $mkinitcpio_conf."
+            fi
+            # --- Конец надежного добавления хука ---
+
+            # Установить тему и пересобрать initramfs (флаг -R делает это)
+            log_info "Setting Plymouth theme to bgrt and rebuilding initramfs..."
+            arch-chroot /mnt plymouth-set-default-theme -R bgrt || { log_fail "Failed to set Plymouth theme or rebuild initramfs"; exit 1; }
+
+            process_return 0
         ) &>"$PROCESS_LOG" &
         process_capture $! "$process_name"
     fi
@@ -1335,25 +1564,57 @@ exec_install_housekeeping() {
     if [ "$ARCH_LINUX_HOUSEKEEPING_ENABLED" = "true" ]; then
         process_init "$process_name"
         (
-            [ "$DEBUG" = "true" ] && sleep 1 && process_return 0                            # If debug mode then return
-            chroot_pacman_install pacman-contrib reflector pkgfile smartmontools irqbalance # Install Base packages
-            {                                                                               # Configure reflector service
-                echo "# Reflector config for the systemd service"
+            [ "$DEBUG" = "true" ] && sleep 1 && process_return 0
+            log_info "Installing housekeeping packages..."
+            chroot_pacman_install pacman-contrib reflector pkgfile smartmontools irqbalance || { log_fail "Failed installing housekeeping packages"; exit 1; }
+
+            log_info "Configuring reflector..."
+            mkdir -p /mnt/etc/xdg/reflector # Ensure directory exists
+            {
+                echo "# Reflector configuration generated by Archlyze installer"
+                echo "# Documentation: man reflector"
+                echo ""
+                echo "# --save: Path where the mirrorlist will be saved"
                 echo "--save /etc/pacman.d/mirrorlist"
-                [ -n "$ARCH_LINUX_REFLECTOR_COUNTRY" ] && echo "--country ${ARCH_LINUX_REFLECTOR_COUNTRY}"
-                #echo "--completion-percent 95"
+                echo ""
+                # Use selected countries (comma-separated) or global if empty
+                if [ -n "$ARCH_LINUX_REFLECTOR_COUNTRY" ]; then
+                    echo "# --country: Restrict mirrors to selected countries"
+                    echo "--country ${ARCH_LINUX_REFLECTOR_COUNTRY}"
+                else
+                    echo "# --country: Not specified, using global mirrors"
+                fi
+                echo ""
+                echo "# --protocol: Specify protocols (https is recommended)"
                 echo "--protocol https"
+                echo ""
+                echo "# --age: Maximum age of mirrors in hours"
                 echo "--age 12"
-                echo "--latest 10"
+                echo ""
+                echo "# --latest: Number of recently synchronized mirrors to select"
+                echo "--latest 20" # <-- Увеличено до 20
+                echo ""
+                echo "# --sort: Sort mirrors by 'rate', 'age', 'score', etc."
                 echo "--sort rate"
-            } >/mnt/etc/xdg/reflector/reflector.conf
-            # Enable services
-            arch-chroot /mnt systemctl enable reflector.service    # Rank mirrors after boot (reflector)
-            arch-chroot /mnt systemctl enable paccache.timer       # Discard cached/unused packages weekly (pacman-contrib)
-            arch-chroot /mnt systemctl enable pkgfile-update.timer # Pkgfile update timer (pkgfile)
-            arch-chroot /mnt systemctl enable smartd               # SMART check service (smartmontools)
-            arch-chroot /mnt systemctl enable irqbalance.service   # IRQ balancing daemon (irqbalance)
-            process_return 0                                       # Return
+                # echo ""
+                # echo "# Optional: Add download speed test (--download-timeout, --fastest)"
+                # echo "--download-timeout 5"
+                # echo "--fastest 10" # Select 10 fastest from the initially sorted list
+            } >/mnt/etc/xdg/reflector/reflector.conf || { log_fail "Failed writing reflector config"; exit 1; }
+
+            log_info "Enabling housekeeping services/timers..."
+            # Enable reflector timer (recommended over service)
+            arch-chroot /mnt systemctl enable reflector.timer || log_warn "Failed enabling reflector.timer"
+            # Enable paccache timer for cleaning package cache
+            arch-chroot /mnt systemctl enable paccache.timer || log_warn "Failed enabling paccache.timer"
+            # Enable pkgfile timer for updating pkgfile database
+            arch-chroot /mnt systemctl enable pkgfile-update.timer || log_warn "Failed enabling pkgfile-update.timer"
+            # Enable SMART monitoring daemon
+            arch-chroot /mnt systemctl enable smartd.service || log_warn "Failed enabling smartd.service"
+            # Enable IRQ balancing daemon
+            arch-chroot /mnt systemctl enable irqbalance.service || log_warn "Failed enabling irqbalance.service"
+
+            process_return 0
         ) &>"$PROCESS_LOG" &
         process_capture $! "$process_name"
     fi
@@ -1404,39 +1665,78 @@ exec_install_vm_support() {
 # shellcheck disable=SC2016
 exec_finalize_arch_linux() {
     local process_name="Finalize Arch Linux"
-    if [ -s "/mnt/home/${ARCH_LINUX_USERNAME}/${INIT_FILENAME}.sh" ]; then
+    local init_script_path="/mnt/home/${ARCH_LINUX_USERNAME}/${INIT_FILENAME}.sh"
+    # Используем имя хоста для создания уникального каталога инициализации
+    # Добавляем . и _init для скрытия и ясности назначения
+    local init_dir_name=".${ARCH_LINUX_HOSTNAME}_init"
+    local init_dir_path="/mnt/home/${ARCH_LINUX_USERNAME}/${init_dir_name}"
+    local target_script_path="${init_dir_path}/${INIT_FILENAME}.sh"
+    local target_log_path="${init_dir_path}/${INIT_FILENAME}.log"
+    local autostart_dir="/mnt/home/${ARCH_LINUX_USERNAME}/.config/autostart"
+    local autostart_file="${autostart_dir}/${INIT_FILENAME}.desktop"
+
+    # Проверяем, существует ли исходный скрипт инициализации
+    if [ -s "$init_script_path" ]; then
         process_init "$process_name"
         (
             [ "$DEBUG" = "true" ] && sleep 1 && process_return 0 # If debug mode then return
-            mkdir -p "/mnt/home/${ARCH_LINUX_USERNAME}/.archlyze/system"
-            mkdir -p "/mnt/home/${ARCH_LINUX_USERNAME}/.config/autostart"
-            mv "/mnt/home/${ARCH_LINUX_USERNAME}/${INIT_FILENAME}.sh" "/mnt/home/${ARCH_LINUX_USERNAME}/.archlyze/system/${INIT_FILENAME}.sh"
+
+            log_info "Creating initialization directory: ${init_dir_path}"
+            mkdir -p "${init_dir_path}" || { log_fail "Failed creating init directory ${init_dir_path}"; exit 1; }
+            log_info "Creating autostart directory: ${autostart_dir}"
+            mkdir -p "${autostart_dir}" || { log_fail "Failed creating autostart directory ${autostart_dir}"; exit 1; }
+
+            log_info "Moving initialization script to ${target_script_path}"
+            mv "$init_script_path" "$target_script_path" || { log_fail "Failed moving init script"; exit 1; }
+
+            # Modify the target script
+            log_info "Modifying initialization script..."
             # Add version env
-            sed -i "1i\ARCH_LINUX_VERSION=${VERSION}" "/mnt/home/${ARCH_LINUX_USERNAME}/.archlyze/system/${INIT_FILENAME}.sh"
+            sed -i "1i\ARCH_LINUX_VERSION=${VERSION}" "$target_script_path" || log_warn "Failed adding version to init script"
             # Add shebang
-            sed -i '1i\#!/usr/bin/env bash' "/mnt/home/${ARCH_LINUX_USERNAME}/.archlyze/system/${INIT_FILENAME}.sh"
-            # Add autostart-remove
+            sed -i '1i\#!/usr/bin/env bash' "$target_script_path" || log_warn "Failed adding shebang to init script"
+            # Add autostart-remove command (referencing the correct autostart file path)
             {
-                echo "# exec_finalize_arch_linux | Remove autostart init files"
-                echo "rm -f /home/${ARCH_LINUX_USERNAME}/.config/autostart/${INIT_FILENAME}.desktop"
-            } >>"/mnt/home/${ARCH_LINUX_USERNAME}/.archlyze/system/${INIT_FILENAME}.sh"
-            # Print initialized info
+                echo "" # Add newline for clarity
+                echo "# exec_finalize_arch_linux | Remove autostart init file after execution"
+                # Use quotes for the path in case hostname contains special chars
+                echo "rm -f \"${autostart_file}\""
+            } >>"$target_script_path" || log_warn "Failed adding autostart removal to init script"
+            # Add Print initialized info command
             {
-                echo "# exec_finalize_arch_linux | Print initialized info"
-                echo "echo \"\$(date '+%Y-%m-%d %H:%M:%S') | Arch Linux \${ARCH_LINUX_VERSION} | Initialized\""
-            } >>"/mnt/home/${ARCH_LINUX_USERNAME}/.archlyze/system/${INIT_FILENAME}.sh"
-            arch-chroot /mnt chmod +x "/home/${ARCH_LINUX_USERNAME}/.archlyze/system/${INIT_FILENAME}.sh"
+                echo "" # Add newline for clarity
+                echo "# exec_finalize_arch_linux | Print initialized info to log"
+                echo "echo \"\$(date '+%Y-%m-%d %H:%M:%S') | Arch Linux \${ARCH_LINUX_VERSION} | Post-install script executed successfully.\""
+            } >>"$target_script_path" || log_warn "Failed adding final log message to init script"
+
+            log_info "Setting execute permission on init script..."
+            arch-chroot /mnt chmod +x "/home/${ARCH_LINUX_USERNAME}/${init_dir_name}/${INIT_FILENAME}.sh" || { log_fail "Failed chmod on init script"; exit 1; }
+
+            # Create autostart desktop entry
+            log_info "Creating autostart entry: ${autostart_file}"
             {
                 echo "[Desktop Entry]"
                 echo "Type=Application"
-                echo "Name=Arch Linux Initialize"
+                echo "Name=Arch Linux Post-Install Setup" # More descriptive name
                 echo "Icon=preferences-system"
-                echo "Exec=bash -c '/home/${ARCH_LINUX_USERNAME}/.archlyze/system/${INIT_FILENAME}.sh > /home/${ARCH_LINUX_USERNAME}/.archlyze/system/${INIT_FILENAME}.log'"
-            } >"/mnt/home/${ARCH_LINUX_USERNAME}/.config/autostart/${INIT_FILENAME}.desktop"
-            arch-chroot /mnt chown -R "$ARCH_LINUX_USERNAME":"$ARCH_LINUX_USERNAME" "/home/${ARCH_LINUX_USERNAME}"
-            process_return 0 # Return
+                # Execute script and redirect output to its log file inside the specific directory
+                # Use quotes for paths
+                echo "Exec=bash -c '\"/home/${ARCH_LINUX_USERNAME}/${init_dir_name}/${INIT_FILENAME}.sh\" > \"/home/${ARCH_LINUX_USERNAME}/${init_dir_name}/${INIT_FILENAME}.log\" 2>&1'"
+                echo "Terminal=false"
+                echo "Hidden=false" # Should not be hidden initially
+                echo "NoDisplay=true" # Hide from application menus, but allow autostart
+                echo "X-GNOME-Autostart-enabled=true"
+            } >"$autostart_file" || { log_fail "Failed creating autostart file"; exit 1; }
+
+            # Set correct ownership for the user's home directory content we created/modified
+            log_info "Setting final ownership for user's home directory..."
+            arch-chroot /mnt chown -R "$ARCH_LINUX_USERNAME":"$ARCH_LINUX_USERNAME" "/home/${ARCH_LINUX_USERNAME}/${init_dir_name}" "/home/${ARCH_LINUX_USERNAME}/.config" || { log_fail "Final chown failed"; exit 1; }
+
+            process_return 0 # Return success
         ) &>"$PROCESS_LOG" &
         process_capture $! "$process_name"
+    else
+        log_info "No initialization script found at ${init_script_path}, skipping finalization step."
     fi
 }
 
